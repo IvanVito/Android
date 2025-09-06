@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">homeSaver</string>
+    <string name="address">Адрес</string>
+    <string name="title_connect">Подключение к удаленному серверу</string>
+    <string name="port">Порт</string>
+    <string name="pick_file">Выбрать</string>
+    <string name="send_file">Отправить</string>
+</resources>

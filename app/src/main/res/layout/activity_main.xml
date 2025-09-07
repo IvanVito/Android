@@ -34,6 +34,27 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"/>
 
+    <Button
+        android:id="@+id/connectToAddress"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/connect_to_address"
+        app:layout_constraintTop_toBottomOf="@id/port"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"/>
+
+    <ProgressBar
+        android:id="@+id/sendBar"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:progress="0"
+        android:max="100"
+        android:visibility="visible"
+        style="?android:attr/progressBarStyleHorizontal"
+        app:layout_constraintTop_toBottomOf="@id/connectToAddress"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
     <LinearLayout
         android:id="@+id/buttons"
         android:layout_width="0dp"
@@ -41,7 +62,7 @@
         android:orientation="horizontal"
         android:layout_marginTop="8dp"
         android:gravity="center"
-        app:layout_constraintTop_toBottomOf="@id/port"
+        app:layout_constraintTop_toBottomOf="@id/sendBar"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
@@ -58,6 +79,5 @@
             android:text="@string/send_file" />
 
     </LinearLayout>
-
 
 </androidx.constraintlayout.widget.ConstraintLayout>

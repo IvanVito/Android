@@ -5,4 +5,5 @@
     <string name="port">Порт</string>
     <string name="pick_file">Выбрать</string>
     <string name="send_file">Отправить</string>
+    <string name="connect_to_address">Подключиться</string>
 </resources>

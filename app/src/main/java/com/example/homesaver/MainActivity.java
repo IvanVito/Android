@@ -12,12 +12,17 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.example.homesaver.databinding.ActivityMainBinding;
 
+import java.io.InputStream;
+
+import okhttp3.*;
+
 public class MainActivity extends AppCompatActivity {
 
     private ActivityMainBinding binding;
     private Uri selectedFileUri;
     private Handler mainHandler;
     private Thread sendingThread;
+    private final OkHttpClient client = new OkHttpClient();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -75,8 +80,47 @@ public class MainActivity extends AppCompatActivity {
         binding = null;
     }
 
-    public void sendFile()
+    public void sendFile(String serverUrl)
     {
+        try
+        {
+            InputStream inputStream = getContentResolver().openInputStream(selectedFileUri);
+            byte[] fileBytes = Object.requireNonNull(inputStream).readAllBytes();
+
+            RequestBody fileBody = RequestBody.create(fileBytes, MediaType.parse("application/octet-stream"));
+
+            MultipartBody requestBody = new MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("file", "loadedFile", fileBody)
+                    .build();
+
+            Request request = new Request.Builder()
+                    .url(serverUrl)
+                    .post(requestBody)
+                    .build();
+
+            client.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    runOnUiThread(() -> binding.fileNameText.setText("Ошибка: " + e.getMessage()));
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    runOnUiThread(() -> {
+                        if (response.isSuccessful()) {
+                            binding.fileNameText.setText("Файл отправлен!");
+                        } else {
+                            binding.fileNameText.setText("Ошибка сервера: " + response.code());
+                        }
+                    });
+                }
+            });
+
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
         selectedFileUri = null;
     }
 }

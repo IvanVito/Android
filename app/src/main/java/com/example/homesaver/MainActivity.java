@@ -1,10 +1,14 @@
 package com.example.homesaver;
 
+import android.annotation.SuppressLint;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.OpenableColumns;
 import android.widget.ProgressBar;
+import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -16,111 +20,119 @@ import java.io.InputStream;
 
 import okhttp3.*;
 
-public class MainActivity extends AppCompatActivity {
+import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
+import java.util.List;
 
+public class MainActivity extends AppCompatActivity {
     private ActivityMainBinding binding;
-    private Uri selectedFileUri;
+    private final List<Uri> selectedFileUris = new ArrayList<>();
     private Handler mainHandler;
-    private Thread sendingThread;
     private final OkHttpClient client = new OkHttpClient();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         binding = ActivityMainBinding.inflate(getLayoutInflater());
+        mainHandler = new Handler(Looper.getMainLooper());
         setContentView(binding.getRoot());
 
-        mainHandler = new Handler(Looper.getMainLooper());
         ActivityResultLauncher<String[]> openDocumentLauncher =
-                registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri ->
-                {
-                    if(uri != null)
-                    {
-                        selectedFileUri = uri;
+                registerForActivityResult(new ActivityResultContracts.OpenMultipleDocuments(), uris -> {
+                    if (uris != null && !uris.isEmpty()) {
+                        selectedFileUris.clear();
+                        selectedFileUris.addAll(uris);
+                        binding.pickFile.setText("Выбрано: " + selectedFileUris.size());
                     }
                 });
+
 
         binding.pickFile.setOnClickListener(v -> {
             openDocumentLauncher.launch(new String[]{"*/*"});
         });
 
-        binding.sendFile.setOnClickListener(v-> {
-            if(selectedFileUri != null)
-            {
+        binding.sendFile.setOnClickListener(v -> {
+            if (selectedFileUris != null) {
                 binding.sendBar.setVisibility(ProgressBar.VISIBLE);
-                sendFile();
-                simulateFileSending();
+                sendFiles(binding.address.getText().toString());
             }
         });
-    }
-    private void simulateFileSending() {
-        if (sendingThread != null && sendingThread.isAlive())
-            sendingThread.interrupt();
-
-        sendingThread = new Thread(() -> {
-            try {
-                for (int i = 0; i <= 100; i += 10) {
-                    final int progress = i;
-                    mainHandler.post(() -> binding.sendBar.setProgress(progress));
-
-                    Thread.sleep(200); // имитация работы
-                }
-            } catch (InterruptedException e) {
-                mainHandler.post(() -> binding.sendBar.setProgress(0));
-            }
-        });
-        sendingThread.start();
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (sendingThread != null && sendingThread.isAlive()) sendingThread.interrupt();
         if (mainHandler != null) mainHandler.removeCallbacksAndMessages(null);
         binding = null;
     }
 
-    public void sendFile(String serverUrl)
-    {
-        try
-        {
-            InputStream inputStream = getContentResolver().openInputStream(selectedFileUri);
-            byte[] fileBytes = Object.requireNonNull(inputStream).readAllBytes();
+    public void sendFiles(String serverUrl) {
+        if (selectedFileUris == null || selectedFileUris.isEmpty()) return;
 
-            RequestBody fileBody = RequestBody.create(fileBytes, MediaType.parse("application/octet-stream"));
+        new Thread(() -> {
+            try {
+                MultipartBody.Builder multipartBuilder = new MultipartBody.Builder()
+                        .setType(MultipartBody.FORM);
 
-            MultipartBody requestBody = new MultipartBody.Builder()
-                    .setType(MultipartBody.FORM)
-                    .addFormDataPart("file", "loadedFile", fileBody)
-                    .build();
+                for (Uri uri : selectedFileUris) {
+                    try (InputStream inputStream = getContentResolver().openInputStream(uri)) {
+                        if (inputStream == null) continue;
 
-            Request request = new Request.Builder()
-                    .url(serverUrl)
-                    .post(requestBody)
-                    .build();
+                        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                        byte[] data = new byte[4096];
+                        int bytesRead;
+                        while ((bytesRead = inputStream.read(data)) != -1)
+                            buffer.write(data, 0, bytesRead);
 
-            client.newCall(request).enqueue(new Callback() {
-                @Override
-                public void onFailure(Call call, IOException e) {
-                    runOnUiThread(() -> binding.fileNameText.setText("Ошибка: " + e.getMessage()));
+                        byte[] fileBytes = buffer.toByteArray();
+                        String fileName = getFileName(uri);
+
+                        RequestBody fileBody = RequestBody.create(
+                                fileBytes,
+                                MediaType.parse("application/octet-stream")
+                        );
+
+                        multipartBuilder.addFormDataPart("files", fileName, fileBody);
+                    }
                 }
 
-                @Override
-                public void onResponse(Call call, Response response) {
-                    runOnUiThread(() -> {
-                        if (response.isSuccessful()) {
-                            binding.fileNameText.setText("Файл отправлен!");
-                        } else {
-                            binding.fileNameText.setText("Ошибка сервера: " + response.code());
-                        }
+                MultipartBody requestBody = multipartBuilder.build();
+                Request request = new Request.Builder()
+                        .url(serverUrl)
+                        .post(requestBody)
+                        .build();
+
+                try (Response response = client.newCall(request).execute()) {
+                    final boolean success = response.isSuccessful();
+                    final int code = response.code();
+                    mainHandler.post(() -> {
+                        if (success)
+                            Toast.makeText(MainActivity.this, "Файлы отправлены!", Toast.LENGTH_SHORT).show();
+                        else
+                            Toast.makeText(MainActivity.this, "Ошибка сервера: " + code, Toast.LENGTH_SHORT).show();
                     });
                 }
-            });
-
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-
-        selectedFileUri = null;
+            } catch (Exception e) {
+                mainHandler.post(() ->
+                        Toast.makeText(MainActivity.this, "Ошибка: " + e.getMessage(), Toast.LENGTH_SHORT).show()
+                );
+            }
+        }).start();
     }
-}
+
+        @SuppressLint("Range")
+        private String getFileName (Uri uri){
+            String result = null;
+            if (uri.getScheme().equals("content")) {
+                try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+                    if (cursor != null && cursor.moveToFirst())
+                        result = cursor.getString(cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME));
+                }
+            }
+
+            if (result == null)
+                result = uri.getLastPathSegment();
+
+            return result;
+        }
+    }

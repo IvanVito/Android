@@ -18,7 +18,7 @@
         android:id="@+id/address"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:hint="@string/address"
+        android:text="http://192.168.1.78:5000/upload"
         android:inputType="text"
         app:layout_constraintTop_toBottomOf="@id/connectMenuText"
         app:layout_constraintStart_toStartOf="parent"

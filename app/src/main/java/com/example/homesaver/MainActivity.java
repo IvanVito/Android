@@ -7,13 +7,16 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.OpenableColumns;
+import android.view.View;
 import android.widget.ProgressBar;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.recyclerview.widget.LinearLayoutManager;
 
+import com.example.homesaver.Adapters.FileAdapter;
 import com.example.homesaver.databinding.ActivityMainBinding;
 
 import java.io.InputStream;
@@ -29,13 +32,20 @@ public class MainActivity extends AppCompatActivity {
     private final List<Uri> selectedFileUris = new ArrayList<>();
     private Handler mainHandler;
     private final OkHttpClient client = new OkHttpClient();
+    private FileAdapter fileAdapter;
 
     @Override
+
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         mainHandler = new Handler(Looper.getMainLooper());
         setContentView(binding.getRoot());
+
+        fileAdapter = new FileAdapter();
+        binding.fileNames.setLayoutManager(new LinearLayoutManager(this));
+        binding.fileNames.setAdapter(fileAdapter);
+
 
         ActivityResultLauncher<String[]> openDocumentLauncher =
                 registerForActivityResult(new ActivityResultContracts.OpenMultipleDocuments(), uris -> {
@@ -44,6 +54,12 @@ public class MainActivity extends AppCompatActivity {
                         selectedFileUris.addAll(uris);
                         binding.pickFile.setText("Выбрано: " + selectedFileUris.size());
                     }
+
+                    List<String> fileNamesList = new ArrayList<>();
+                    for (Uri uri : selectedFileUris)
+                        fileNamesList.add(getFileName(uri));
+
+                    fileAdapter.setFiles(fileNamesList);
                 });
 
 
@@ -59,18 +75,14 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (mainHandler != null) mainHandler.removeCallbacksAndMessages(null);
-        binding = null;
-    }
-
     public void sendFiles(String serverUrl) {
         if (selectedFileUris == null || selectedFileUris.isEmpty()) return;
 
         new Thread(() -> {
             try {
+                long totalBytes = selectedFileUris.stream().mapToLong(this::getFileSize).sum();
+                long[] uploadedBytes = {0};
+
                 MultipartBody.Builder multipartBuilder = new MultipartBody.Builder()
                         .setType(MultipartBody.FORM);
 
@@ -81,8 +93,9 @@ public class MainActivity extends AppCompatActivity {
                         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
                         byte[] data = new byte[4096];
                         int bytesRead;
-                        while ((bytesRead = inputStream.read(data)) != -1)
+                        while ((bytesRead = inputStream.read(data)) != -1) {
                             buffer.write(data, 0, bytesRead);
+                        }
 
                         byte[] fileBytes = buffer.toByteArray();
                         String fileName = getFileName(uri);
@@ -92,7 +105,15 @@ public class MainActivity extends AppCompatActivity {
                                 MediaType.parse("application/octet-stream")
                         );
 
-                        multipartBuilder.addFormDataPart("files", fileName, fileBody);
+                        ProgressRequestBody progressBody = new ProgressRequestBody(fileBody,
+                                (bytesWritten, contentLength) -> {
+                                    uploadedBytes[0] += bytesWritten;
+
+                                    int progress = (int) ((100L * uploadedBytes[0]) / totalBytes);
+                                    mainHandler.post(() -> binding.sendBar.setProgress(progress));
+                                });
+
+                        multipartBuilder.addFormDataPart("files", fileName, progressBody);
                     }
                 }
 
@@ -110,6 +131,7 @@ public class MainActivity extends AppCompatActivity {
                             Toast.makeText(MainActivity.this, "Файлы отправлены!", Toast.LENGTH_SHORT).show();
                         else
                             Toast.makeText(MainActivity.this, "Ошибка сервера: " + code, Toast.LENGTH_SHORT).show();
+                        binding.sendBar.setVisibility(View.GONE);
                     });
                 }
             } catch (Exception e) {
@@ -120,19 +142,42 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-        @SuppressLint("Range")
-        private String getFileName (Uri uri){
-            String result = null;
-            if (uri.getScheme().equals("content")) {
-                try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
-                    if (cursor != null && cursor.moveToFirst())
-                        result = cursor.getString(cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME));
-                }
-            }
 
-            if (result == null)
-                result = uri.getLastPathSegment();
-
-            return result;
-        }
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (mainHandler != null) mainHandler.removeCallbacksAndMessages(null);
+        binding = null;
     }
+
+    @SuppressLint("Range")
+    private String getFileName(Uri uri) {
+        String result = null;
+        if (uri.getScheme().equals("content")) {
+            try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst())
+                    result = cursor.getString(cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME));
+            }
+        }
+
+        if (result == null)
+            result = uri.getLastPathSegment();
+
+        return result;
+    }
+
+    private long getFileSize(Uri uri) {
+        try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE);
+                return cursor.getLong(sizeIndex);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return 0;
+    }
+}
+
+
